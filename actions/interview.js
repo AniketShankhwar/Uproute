@@ -4,7 +4,7 @@ import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
 import OpenAI from "openai";
 
-// Initialize OpenAI client via OpenRouter
+// Initialize the OpenAI client with OpenRouter's DeepSeek R1 model
 const openai = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY,
   baseURL: "https://openrouter.ai/api/v1",
@@ -12,29 +12,25 @@ const openai = new OpenAI({
 
 // Function to generate a technical interview quiz
 export async function generateQuiz() {
-  // 1. Authenticate user
-  const { userId } = await auth();
+  const { userId } = await auth(); // Get the authenticated user's ID
   if (!userId) throw new Error("Unauthorized");
 
-  // 2. Fetch user's industry & skills
+  // Fetch user's industry and skills from the database
   const user = await db.user.findUnique({
     where: { clerkUserId: userId },
     select: { industry: true, skills: true },
   });
   if (!user) throw new Error("User not found");
 
-  // 3. Build the prompt
+  // Prepare prompt for the LLM to generate quiz questions
   const prompt = `
 Generate 10 technical interview questions for a ${user.industry} professional${
-    user.skills?.length
-      ? ` with expertise in ${user.skills.join(", ")}`
-      : ""
+    user.skills?.length ? ` with expertise in ${user.skills.join(", ")}` : ""
   }.
 
 Each question should be multiple choice with 4 options.
 
 Return the response in this JSON format only, no additional text:
-
 {
   "questions": [
     {
@@ -45,40 +41,24 @@ Return the response in this JSON format only, no additional text:
     }
   ]
 }
-`;
+  `;
 
   try {
-    // 4. Call the LLM
+    // Send prompt to DeepSeek R1 via OpenRouter
     const completion = await openai.chat.completions.create({
       model: "deepseek/deepseek-r1:free",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
     });
 
-    // 5. Extract and log raw response
+    // Clean and parse the LLM's response to get questions
     const raw = completion.choices[0].message.content;
-    console.error("Raw LLM response for quiz:", raw);
-
-    // 6. Extract JSON block via regex
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Invalid JSON from LLM: no JSON object found");
-    }
-
-    // 7. Parse and validate
-    const quiz = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(quiz.questions)) {
-      throw new Error("Invalid JSON from LLM: missing 'questions' array");
-    }
+    const cleaned = raw.replace(/```(?:json)?\n?/g, "").trim();
+    const quiz = JSON.parse(cleaned);
 
     return quiz.questions;
   } catch (error) {
     console.error("Error generating quiz:", error);
-    // In dev, re-throw real error to see full stack/message
-    if (process.env.NODE_ENV !== "production") {
-      throw error;
-    }
-    // In production, generic message to avoid leaking sensitive details
     throw new Error("Failed to generate quiz questions");
   }
 }
@@ -93,7 +73,7 @@ export async function saveQuizResult(questions, answers, score) {
   });
   if (!user) throw new Error("User not found");
 
-  // Prepare question result array
+  // Prepare question result array with user answers and correct ones
   const questionResults = questions.map((q, index) => ({
     question: q.question,
     answer: q.correctAnswer,
@@ -102,9 +82,10 @@ export async function saveQuizResult(questions, answers, score) {
     explanation: q.explanation,
   }));
 
-  // Generate improvement tip if needed
+  // If there are wrong answers, generate an improvement tip
   const wrong = questionResults.filter((r) => !r.isCorrect);
   let improvementTip = null;
+
   if (wrong.length > 0) {
     const wrongText = wrong
       .map(
@@ -112,14 +93,17 @@ export async function saveQuizResult(questions, answers, score) {
           `Question: "${r.question}"\nCorrect Answer: "${r.answer}"\nYour Answer: "${r.userAnswer}"`
       )
       .join("\n\n");
+
     const tipPrompt = `
 The user got the following ${user.industry} technical interview questions wrong:
 
 ${wrongText}
 
-Based on these mistakes, provide a concise improvement tip (under 2 sentences) focusing on what to learn or practice. Do not mention the mistakes explicitly.
-`;
+Based on these mistakes, provide a concise improvement tip (under 2 sentences) focusing on what to learn or practice. Do not mention the mistakes explicitly.(Also don't start response with **Improvement Tip:** Writen).
+    `;
+
     try {
+      // Ask the LLM to generate a tip based on mistakes
       const tipCompletion = await openai.chat.completions.create({
         model: "deepseek/deepseek-r1:free",
         messages: [{ role: "user", content: tipPrompt }],
@@ -131,15 +115,42 @@ Based on these mistakes, provide a concise improvement tip (under 2 sentences) f
     }
   }
 
-  // Save full assessment
-  const assessment = await db.assessment.create({
-    data: {
-      userId: user.id,
-      quizScore: score,
-      questions: questionResults,
-      category: "Technical",
-      improvementTip,
-    },
+  try {
+    // Save the full assessment in the database
+    const assessment = await db.assessment.create({
+      data: {
+        userId: user.id,
+        quizScore: score,
+        questions: questionResults,
+        category: "Technical",
+        improvementTip,
+      },
+    });
+    return assessment;
+  } catch (err) {
+    console.error("Error saving quiz result:", err);
+    throw new Error("Failed to save quiz result");
+  }
+}
+
+// Function to get all previous assessments for the user
+export async function getAssessments() {
+  const { userId } = await auth(); // Check if user is authenticated
+  if (!userId) throw new Error("Unauthorized");
+
+  const user = await db.user.findUnique({
+    where: { clerkUserId: userId },
   });
-  return assessment;
+  if (!user) throw new Error("User not found");
+
+  try {
+    // Fetch all assessments sorted by creation date
+    return await db.assessment.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "asc" },
+    });
+  } catch (err) {
+    console.error("Error fetching assessments:", err);
+    throw new Error("Failed to fetch assessments");
+  }
 }
