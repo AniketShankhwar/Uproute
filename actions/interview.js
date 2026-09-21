@@ -46,7 +46,7 @@ Return the response in this JSON format only, no additional text:
   try {
     // Send prompt to DeepSeek R1 via OpenRouter
     const completion = await openai.chat.completions.create({
-      model: "deepseek/deepseek-r1:free",
+      model: "nvidia/nemotron-3-super-120b-a12b:free",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
     });
@@ -90,7 +90,7 @@ export async function saveQuizResult(questions, answers, score) {
     const wrongText = wrong
       .map(
         (r) =>
-          `Question: "${r.question}"\nCorrect Answer: "${r.answer}"\nYour Answer: "${r.userAnswer}"`
+          `Question: "${r.question}"\nCorrect Answer: "${r.answer}"\nYour Answer: "${r.userAnswer}"`,
       )
       .join("\n\n");
 
@@ -105,7 +105,7 @@ Based on these mistakes, provide a concise improvement tip (under 2 sentences) f
     try {
       // Ask the LLM to generate a tip based on mistakes
       const tipCompletion = await openai.chat.completions.create({
-        model: "deepseek/deepseek-r1:free",
+        model: "nvidia/nemotron-3-super-120b-a12b:free",
         messages: [{ role: "user", content: tipPrompt }],
         temperature: 0.7,
       });
