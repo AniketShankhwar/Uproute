@@ -4,12 +4,17 @@ import PerformanceChart from "./_components/performance-chart";
 import QuizList from "./_components/quiz-list";
 import StatsCards from "./_components/stats-cards";
 
+export const dynamic = "force-dynamic";
+
 export default async function InterviewPage() {
   let assessments;
   try {
     // Try fetching data—this can throw if your server action errors
     assessments = await getAssessments();
   } catch (error) {
+    if (error?.digest === "DYNAMIC_SERVER_USAGE") {
+      throw error;
+    }
     // Log the real error (you’ll see this in your server logs)
     console.error("Failed to load assessments:", error);
     // Render a user-friendly fallback UI
