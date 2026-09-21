@@ -52,7 +52,7 @@ Format the letter in markdown.
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "deepseek/deepseek-r1:free",
+          model: "nvidia/nemotron-3-super-120b-a12b:free",
           messages: [
             {
               role: "system",
@@ -62,7 +62,7 @@ Format the letter in markdown.
           ],
           temperature: 0.7,
         }),
-      }
+      },
     );
 
     const result = await response.json();
